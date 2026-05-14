@@ -2,7 +2,11 @@
   "permissions": {
     "allow": [
       "PowerShell(Get-ChildItem -Recurse \"C:\\\\Homework\\\\lab-12\\\\library-management-system\" | Where-Object { !$_.PSIsContainer } | Select-Object -ExpandProperty FullName | Sort-Object)",
-      "Bash(python -c ' *)"
+      "Bash(python -c ' *)",
+      "Bash(python -m pytest tests/conftest.py --collect-only -q)",
+      "Bash(pip show *)",
+      "Bash(git add *)",
+      "Bash(git commit -m 'test: replace conftest with async pytest-asyncio + httpx setup *)"
     ]
   }
 }
