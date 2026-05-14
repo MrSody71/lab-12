@@ -1,32 +1,44 @@
+from fastapi import HTTPException, status
+from sqlalchemy import select
 from sqlalchemy.orm import Session
+
+from app.core.security import create_access_token, hash_password, verify_password
 from app.models.user import User
-from app.schemas.user import UserCreate
-from app.core.security import hash_password, verify_password
+from app.schemas.user import Token, UserCreate
 
 
-def get_user_by_email(db: Session, email: str) -> User | None:
-    return db.query(User).filter(User.email == email).first()
+class AuthService:
+    def __init__(self, db: Session) -> None:
+        self.db = db
 
-
-def get_user_by_username(db: Session, username: str) -> User | None:
-    return db.query(User).filter(User.username == username).first()
-
-
-def create_user(db: Session, user_in: UserCreate) -> User:
-    user = User(
-        email=user_in.email,
-        username=user_in.username,
-        full_name=user_in.full_name,
-        hashed_password=hash_password(user_in.password),
-    )
-    db.add(user)
-    db.commit()
-    db.refresh(user)
-    return user
-
-
-def authenticate_user(db: Session, email: str, password: str) -> User | None:
-    user = get_user_by_email(db, email)
-    if user and verify_password(password, user.hashed_password):
+    def register(self, user_data: UserCreate) -> User:
+        if self.db.execute(select(User).where(User.email == user_data.email)).scalar_one_or_none():
+            raise HTTPException(
+                status_code=status.HTTP_400_BAD_REQUEST,
+                detail="Email already registered",
+            )
+        if self.db.execute(select(User).where(User.username == user_data.username)).scalar_one_or_none():
+            raise HTTPException(
+                status_code=status.HTTP_400_BAD_REQUEST,
+                detail="Username already taken",
+            )
+        user = User(
+            email=user_data.email,
+            username=user_data.username,
+            full_name=user_data.full_name,
+            hashed_password=hash_password(user_data.password),
+        )
+        self.db.add(user)
+        self.db.commit()
+        self.db.refresh(user)
         return user
-    return None
+
+    def authenticate(self, email: str, password: str) -> User | None:
+        user = self.db.execute(select(User).where(User.email == email)).scalar_one_or_none()
+        if user and verify_password(password, user.hashed_password):
+            return user
+        return None
+
+    def create_token(self, user: User) -> Token:
+        access_token = create_access_token({"sub": str(user.id)})
+        return Token(access_token=access_token, token_type="bearer")

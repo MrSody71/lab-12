@@ -1,14 +1,17 @@
 from datetime import datetime, timedelta, timezone
+
 from fastapi import APIRouter, Depends, HTTPException, status
 from sqlalchemy.orm import Session
+
+from app.core.config import get_settings
+from app.core.dependencies import get_current_user
 from app.database import get_db
-from app.models.borrowing import Borrowing
 from app.models.book import Book
+from app.models.borrowing import Borrowing
 from app.models.fine import Fine
 from app.models.user import User
 from app.schemas.borrowing import BorrowingCreate, BorrowingResponse
 from app.schemas.fine import FineResponse
-from app.core.dependencies import get_current_user
 from app.services.fine_calculator import calculate_fine
 
 router = APIRouter(prefix="/borrowings", tags=["borrowings"])
@@ -56,7 +59,7 @@ def return_book(
     borrowing.returned_at = now
     borrowing.book.available_copies += 1
 
-    fine_amount = calculate_fine(borrowing.due_date, now)
+    fine_amount = calculate_fine(borrowing.due_date, now, get_settings().FINE_PER_DAY)
     if fine_amount > 0:
         db.add(Fine(borrowing_id=borrowing.id, amount=fine_amount))
 
