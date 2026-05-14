@@ -78,7 +78,18 @@ def update_book(
     book = db.query(Book).filter(Book.id == book_id).first()
     if not book:
         raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Book not found")
-    for field, value in book_in.model_dump(exclude_unset=True).items():
+    update_data = book_in.model_dump(exclude_unset=True)
+    if "total_copies" in update_data:
+        currently_borrowed = book.total_copies - book.available_copies
+        if update_data["total_copies"] < currently_borrowed:
+            raise HTTPException(
+                status_code=status.HTTP_400_BAD_REQUEST,
+                detail=(
+                    f"Cannot reduce total_copies below currently borrowed count"
+                    f" ({currently_borrowed})"
+                ),
+            )
+    for field, value in update_data.items():
         setattr(book, field, value)
     db.commit()
     db.refresh(book)

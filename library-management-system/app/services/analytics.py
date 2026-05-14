@@ -1,5 +1,7 @@
 from datetime import datetime, timedelta, timezone
 
+_STATS_LOOKBACK_DAYS = 366  # covers 12 calendar months even in leap years
+
 from sqlalchemy import extract, func, select
 from sqlalchemy.orm import Session
 
@@ -79,7 +81,7 @@ class AnalyticsService:
         }
 
     def get_monthly_stats(self) -> list[dict]:
-        twelve_months_ago = datetime.now(timezone.utc) - timedelta(days=365)
+        twelve_months_ago = datetime.now(timezone.utc) - timedelta(days=_STATS_LOOKBACK_DAYS)
         year_col = extract("year", Borrowing.borrowed_at).label("year")
         month_col = extract("month", Borrowing.borrowed_at).label("month")
         stmt = (

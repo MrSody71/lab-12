@@ -23,7 +23,8 @@ def borrow_book(
     current_user: User = Depends(get_current_user),
 ) -> BorrowingResponse:
     """Borrow a book for the current user."""
-    book = db.query(Book).filter(Book.id == borrow_in.book_id).first()
+    # with_for_update() locks the row until commit — prevents race condition on available_copies
+    book = db.query(Book).filter(Book.id == borrow_in.book_id).with_for_update().first()
     if not book:
         raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Book not found")
     if book.available_copies < 1:
@@ -99,10 +100,13 @@ def return_book(
     if borrowing.is_returned:
         raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail="Book already returned")
 
+    # Fetch and lock the book row explicitly — avoids lazy-load and prevents double-increment
+    book = db.query(Book).filter(Book.id == borrowing.book_id).with_for_update().first()
+
     now = datetime.now(timezone.utc)
     borrowing.is_returned = True
     borrowing.returned_at = now
-    borrowing.book.available_copies += 1
+    book.available_copies += 1
 
     fine_amount = calculate_fine(borrowing.due_date, now, get_settings().FINE_PER_DAY)
     if fine_amount > 0:

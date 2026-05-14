@@ -6,7 +6,7 @@ def _validate_isbn_digits(value: str) -> str:
     digits = value.replace("-", "").replace(" ", "")
     if not digits.isdigit() or len(digits) not in (10, 13):
         raise ValueError("ISBN must contain exactly 10 or 13 digits (hyphens/spaces ignored)")
-    return value
+    return digits  # store normalized form so uniqueness constraint works correctly
 
 
 class BookBase(BaseModel):

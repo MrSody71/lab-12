@@ -8,8 +8,8 @@ class Borrowing(Base):
     __tablename__ = "borrowings"
 
     id = Column(Integer, primary_key=True, index=True)
-    book_id = Column(Integer, ForeignKey("books.id"), nullable=False)
-    reader_id = Column(Integer, ForeignKey("users.id"), nullable=False)
+    book_id = Column(Integer, ForeignKey("books.id"), nullable=False, index=True)
+    reader_id = Column(Integer, ForeignKey("users.id"), nullable=False, index=True)
     borrowed_at = Column(
         DateTime(timezone=True),
         default=lambda: datetime.now(timezone.utc),
@@ -21,7 +21,7 @@ class Borrowing(Base):
         default=lambda: datetime.now(timezone.utc) + timedelta(days=14),
     )
     returned_at = Column(DateTime(timezone=True), nullable=True)
-    is_returned = Column(Boolean, default=False)
+    is_returned = Column(Boolean, default=False, index=True)
 
     book: "Book" = relationship("Book", back_populates="borrowings")
     reader: "User" = relationship("User", back_populates="borrowings")
