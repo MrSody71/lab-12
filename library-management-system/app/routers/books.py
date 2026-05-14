@@ -3,7 +3,7 @@ from sqlalchemy.orm import Session
 from app.database import get_db
 from app.models.book import Book
 from app.schemas.book import BookCreate, BookUpdate, BookResponse
-from app.core.dependencies import get_current_user, get_current_admin
+from app.core.dependencies import get_current_admin
 from app.models.user import User
 
 router = APIRouter(prefix="/books", tags=["books"])
@@ -11,7 +11,7 @@ router = APIRouter(prefix="/books", tags=["books"])
 
 @router.get("/", response_model=list[BookResponse])
 def list_books(skip: int = 0, limit: int = 100, db: Session = Depends(get_db)):
-    return db.query(Book).filter(Book.is_active == True).offset(skip).limit(limit).all()
+    return db.query(Book).offset(skip).limit(limit).all()
 
 
 @router.get("/{book_id}", response_model=BookResponse)
@@ -48,5 +48,5 @@ def delete_book(book_id: int, db: Session = Depends(get_db), _: User = Depends(g
     book = db.query(Book).filter(Book.id == book_id).first()
     if not book:
         raise HTTPException(status_code=404, detail="Book not found")
-    book.is_active = False
+    db.delete(book)
     db.commit()

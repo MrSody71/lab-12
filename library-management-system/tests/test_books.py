@@ -5,22 +5,26 @@ from app.core.security import hash_password
 
 @pytest.fixture
 def admin_headers(client, db):
-    user = User(email="adm@test.com", full_name="Admin", hashed_password=hash_password("pass"), is_admin=True)
+    user = User(
+        email="adm@test.com", username="admin", full_name="Admin",
+        hashed_password=hash_password("pass"), is_admin=True,
+    )
     db.add(user)
     db.commit()
     resp = client.post("/auth/token", data={"username": "adm@test.com", "password": "pass"})
-    token = resp.json()["access_token"]
-    return {"Authorization": f"Bearer {token}"}
+    return {"Authorization": f"Bearer {resp.json()['access_token']}"}
 
 
 @pytest.fixture
 def user_headers(client, db):
-    user = User(email="usr@test.com", full_name="User", hashed_password=hash_password("pass"))
+    user = User(
+        email="usr@test.com", username="regularuser", full_name="User",
+        hashed_password=hash_password("pass"),
+    )
     db.add(user)
     db.commit()
     resp = client.post("/auth/token", data={"username": "usr@test.com", "password": "pass"})
-    token = resp.json()["access_token"]
-    return {"Authorization": f"Bearer {token}"}
+    return {"Authorization": f"Bearer {resp.json()['access_token']}"}
 
 
 def test_list_books_empty(client):
@@ -66,3 +70,14 @@ def test_update_book(client, admin_headers):
     response = client.patch(f"/books/{created['id']}", json={"title": "New Title"}, headers=admin_headers)
     assert response.status_code == 200
     assert response.json()["title"] == "New Title"
+
+
+def test_delete_book(client, admin_headers):
+    created = client.post("/books/", json={
+        "title": "To Delete",
+        "author": "Author",
+        "isbn": "222-2-22-222222-2",
+    }, headers=admin_headers).json()
+    response = client.delete(f"/books/{created['id']}", headers=admin_headers)
+    assert response.status_code == 204
+    assert client.get(f"/books/{created['id']}").status_code == 404

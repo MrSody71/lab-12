@@ -5,7 +5,10 @@ from app.core.security import hash_password
 
 @pytest.fixture
 def auth_headers(client, db):
-    user = User(email="reader@test.com", full_name="Reader", hashed_password=hash_password("pass"))
+    user = User(
+        email="reader@test.com", username="reader", full_name="Reader",
+        hashed_password=hash_password("pass"),
+    )
     db.add(user)
     db.commit()
     resp = client.post("/auth/token", data={"username": "reader@test.com", "password": "pass"})
@@ -15,7 +18,9 @@ def auth_headers(client, db):
 def test_get_me(client, auth_headers):
     response = client.get("/readers/me", headers=auth_headers)
     assert response.status_code == 200
-    assert response.json()["email"] == "reader@test.com"
+    data = response.json()
+    assert data["email"] == "reader@test.com"
+    assert data["username"] == "reader"
 
 
 def test_update_me(client, auth_headers):

@@ -17,7 +17,7 @@ def popular_books(limit: int = 10, db: Session = Depends(get_db), _: User = Depe
 @router.get("/analytics/overdue")
 def overdue_borrowings(db: Session = Depends(get_db), _: User = Depends(get_current_admin)):
     borrowings = get_overdue_borrowings(db)
-    return [{"id": b.id, "user_id": b.user_id, "book_id": b.book_id, "due_date": b.due_date} for b in borrowings]
+    return [{"id": b.id, "reader_id": b.reader_id, "book_id": b.book_id, "due_date": b.due_date} for b in borrowings]
 
 
 @router.get("/analytics/fines")

@@ -7,7 +7,9 @@ class BookBase(BaseModel):
     author: str
     isbn: str
     genre: str | None = None
+    year_published: int | None = None
     total_copies: int = 1
+    description: str | None = None
 
 
 class BookCreate(BookBase):
@@ -18,14 +20,14 @@ class BookUpdate(BaseModel):
     title: str | None = None
     author: str | None = None
     genre: str | None = None
+    year_published: int | None = None
     total_copies: int | None = None
-    is_active: bool | None = None
+    description: str | None = None
 
 
 class BookResponse(BookBase):
     id: int
     available_copies: int
-    is_active: bool
     created_at: datetime
 
     model_config = {"from_attributes": True}
