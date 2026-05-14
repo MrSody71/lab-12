@@ -1,4 +1,4 @@
-def test_register_user(client):
+﻿def test_register_user(client):
     response = client.post("/auth/register", json={
         "email": "new@test.com",
         "username": "newuser",
@@ -37,7 +37,7 @@ def test_login_success(client):
     client.post("/auth/register", json={
         "email": "a@test.com", "username": "usera", "full_name": "A", "password": "password1",
     })
-    response = client.post("/auth/token", data={"username": "a@test.com", "password": "password1"})
+    response = client.post("/auth/login", data={"username": "a@test.com", "password": "password1"})
     assert response.status_code == 200
     assert "access_token" in response.json()
 
@@ -46,5 +46,6 @@ def test_login_wrong_password(client):
     client.post("/auth/register", json={
         "email": "b@test.com", "username": "userb", "full_name": "B", "password": "password1",
     })
-    response = client.post("/auth/token", data={"username": "b@test.com", "password": "wrongpass"})
+    response = client.post("/auth/login", data={"username": "b@test.com", "password": "wrongpass"})
     assert response.status_code == 401
+

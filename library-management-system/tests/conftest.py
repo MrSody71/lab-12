@@ -1,4 +1,4 @@
-import pytest
+﻿import pytest
 from fastapi.testclient import TestClient
 from sqlalchemy import create_engine
 from sqlalchemy.orm import sessionmaker
@@ -72,7 +72,7 @@ def admin_token(client):
     client.post("/auth/register", json={
         "email": "admin@test.com", "username": "admin", "full_name": "Admin", "password": "adminpass",
     })
-    response = client.post("/auth/token", data={"username": "admin@test.com", "password": "adminpass"})
+    response = client.post("/auth/login", data={"username": "admin@test.com", "password": "adminpass"})
     return response.json()["access_token"]
 
 
@@ -81,5 +81,6 @@ def user_token(client):
     client.post("/auth/register", json={
         "email": "user@test.com", "username": "regular_user", "full_name": "User", "password": "userpass",
     })
-    response = client.post("/auth/token", data={"username": "user@test.com", "password": "userpass"})
+    response = client.post("/auth/login", data={"username": "user@test.com", "password": "userpass"})
     return response.json()["access_token"]
+

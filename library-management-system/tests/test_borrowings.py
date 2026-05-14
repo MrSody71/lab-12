@@ -12,7 +12,7 @@ def user_headers(client, db):
     )
     db.add(user)
     db.commit()
-    resp = client.post("/auth/token", data={"username": "borrower@test.com", "password": "pass1234"})
+    resp = client.post("/auth/login", data={"username": "borrower@test.com", "password": "pass1234"})
     return {"Authorization": f"Bearer {resp.json()['access_token']}"}
 
 
@@ -55,16 +55,21 @@ def test_borrow_unavailable_book(client, user_headers, db):
     assert response.status_code == 400
 
 
-def test_due_days_validation(client, user_headers, available_book):
+def test_borrow_same_book_twice(client, user_headers, available_book):
+    """Second borrow of the same unreturned book must be rejected."""
+    client.post("/borrowings/", json={"book_id": available_book.id, "due_days": 14}, headers=user_headers)
     response = client.post(
-        "/borrowings/", json={"book_id": available_book.id, "due_days": 0}, headers=user_headers,
+        "/borrowings/", json={"book_id": available_book.id, "due_days": 14}, headers=user_headers,
     )
-    assert response.status_code == 422
+    assert response.status_code == 400
 
-    response = client.post(
-        "/borrowings/", json={"book_id": available_book.id, "due_days": 31}, headers=user_headers,
-    )
-    assert response.status_code == 422
+
+def test_due_days_validation(client, user_headers, available_book):
+    for invalid in (0, 31):
+        response = client.post(
+            "/borrowings/", json={"book_id": available_book.id, "due_days": invalid}, headers=user_headers,
+        )
+        assert response.status_code == 422
 
 
 def test_return_book(client, user_headers, available_book):
@@ -76,8 +81,11 @@ def test_return_book(client, user_headers, available_book):
     assert response.json()["is_returned"] is True
 
 
-def test_my_borrowings(client, user_headers, available_book):
+def test_list_my_borrowings(client, user_headers, available_book):
     client.post("/borrowings/", json={"book_id": available_book.id, "due_days": 7}, headers=user_headers)
-    response = client.get("/borrowings/my", headers=user_headers)
+    response = client.get("/borrowings/", headers=user_headers)
     assert response.status_code == 200
-    assert len(response.json()) == 1
+    data = response.json()
+    assert len(data) == 1
+    assert "book" in data[0]
+    assert "reader" in data[0]

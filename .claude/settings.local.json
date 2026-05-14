@@ -1,7 +1,8 @@
 {
   "permissions": {
     "allow": [
-      "PowerShell(Get-ChildItem -Recurse \"C:\\\\Homework\\\\lab-12\\\\library-management-system\" | Where-Object { !$_.PSIsContainer } | Select-Object -ExpandProperty FullName | Sort-Object)"
+      "PowerShell(Get-ChildItem -Recurse \"C:\\\\Homework\\\\lab-12\\\\library-management-system\" | Where-Object { !$_.PSIsContainer } | Select-Object -ExpandProperty FullName | Sort-Object)",
+      "Bash(python -c ' *)"
     ]
   }
 }
