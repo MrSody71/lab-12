@@ -1,5 +1,6 @@
-from pydantic import BaseModel
 from datetime import datetime
+from pydantic import BaseModel, ConfigDict
+from app.schemas.borrowing import BorrowingResponse
 
 
 class FineResponse(BaseModel):
@@ -10,4 +11,8 @@ class FineResponse(BaseModel):
     created_at: datetime
     paid_at: datetime | None
 
-    model_config = {"from_attributes": True}
+    model_config = ConfigDict(from_attributes=True)
+
+
+class FineWithDetails(FineResponse):
+    borrowing: BorrowingResponse

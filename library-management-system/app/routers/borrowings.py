@@ -1,15 +1,15 @@
+from datetime import datetime, timedelta, timezone
 from fastapi import APIRouter, Depends, HTTPException, status
 from sqlalchemy.orm import Session
-from datetime import datetime, timezone
 from app.database import get_db
 from app.models.borrowing import Borrowing
 from app.models.book import Book
 from app.models.fine import Fine
+from app.models.user import User
 from app.schemas.borrowing import BorrowingCreate, BorrowingResponse
 from app.schemas.fine import FineResponse
 from app.core.dependencies import get_current_user
 from app.services.fine_calculator import calculate_fine
-from app.models.user import User
 
 router = APIRouter(prefix="/borrowings", tags=["borrowings"])
 
@@ -26,11 +26,8 @@ def borrow_book(
     if book.available_copies < 1:
         raise HTTPException(status_code=400, detail="No copies available")
 
-    kwargs: dict = {"reader_id": current_user.id, "book_id": book.id}
-    if borrow_in.due_date is not None:
-        kwargs["due_date"] = borrow_in.due_date
-
-    borrowing = Borrowing(**kwargs)
+    due_date = datetime.now(timezone.utc) + timedelta(days=borrow_in.due_days)
+    borrowing = Borrowing(reader_id=current_user.id, book_id=book.id, due_date=due_date)
     book.available_copies -= 1
     db.add(borrowing)
     db.commit()
