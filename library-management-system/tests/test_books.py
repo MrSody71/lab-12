@@ -1,11 +1,11 @@
 import pytest
 from app.models.user import User
-from app.core.security import get_password_hash
+from app.core.security import hash_password
 
 
 @pytest.fixture
 def admin_headers(client, db):
-    user = User(email="adm@test.com", full_name="Admin", hashed_password=get_password_hash("pass"), is_admin=True)
+    user = User(email="adm@test.com", full_name="Admin", hashed_password=hash_password("pass"), is_admin=True)
     db.add(user)
     db.commit()
     resp = client.post("/auth/token", data={"username": "adm@test.com", "password": "pass"})
@@ -15,7 +15,7 @@ def admin_headers(client, db):
 
 @pytest.fixture
 def user_headers(client, db):
-    user = User(email="usr@test.com", full_name="User", hashed_password=get_password_hash("pass"))
+    user = User(email="usr@test.com", full_name="User", hashed_password=hash_password("pass"))
     db.add(user)
     db.commit()
     resp = client.post("/auth/token", data={"username": "usr@test.com", "password": "pass"})

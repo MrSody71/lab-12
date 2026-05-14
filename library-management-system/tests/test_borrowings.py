@@ -1,13 +1,13 @@
 import pytest
-from datetime import datetime, timedelta
+from datetime import datetime, timedelta, timezone
 from app.models.user import User
 from app.models.book import Book
-from app.core.security import get_password_hash
+from app.core.security import hash_password
 
 
 @pytest.fixture
 def user_headers(client, db):
-    user = User(email="borrower@test.com", full_name="Borrower", hashed_password=get_password_hash("pass"))
+    user = User(email="borrower@test.com", full_name="Borrower", hashed_password=hash_password("pass"))
     db.add(user)
     db.commit()
     resp = client.post("/auth/token", data={"username": "borrower@test.com", "password": "pass"})
@@ -24,7 +24,7 @@ def available_book(db):
 
 
 def test_borrow_book(client, user_headers, available_book):
-    due = (datetime.utcnow() + timedelta(days=14)).isoformat()
+    due = (datetime.now(timezone.utc) + timedelta(days=14)).isoformat()
     response = client.post("/borrowings/", json={"book_id": available_book.id, "due_date": due}, headers=user_headers)
     assert response.status_code == 201
     assert response.json()["book_id"] == available_book.id
@@ -34,13 +34,13 @@ def test_borrow_unavailable_book(client, user_headers, db):
     book = Book(title="No Copies", author="A", isbn="000-0", total_copies=1, available_copies=0)
     db.add(book)
     db.commit()
-    due = (datetime.utcnow() + timedelta(days=7)).isoformat()
+    due = (datetime.now(timezone.utc) + timedelta(days=7)).isoformat()
     response = client.post("/borrowings/", json={"book_id": book.id, "due_date": due}, headers=user_headers)
     assert response.status_code == 400
 
 
 def test_return_book(client, user_headers, available_book):
-    due = (datetime.utcnow() + timedelta(days=14)).isoformat()
+    due = (datetime.now(timezone.utc) + timedelta(days=14)).isoformat()
     borrowing = client.post("/borrowings/", json={"book_id": available_book.id, "due_date": due}, headers=user_headers).json()
     response = client.post(f"/borrowings/{borrowing['id']}/return", headers=user_headers)
     assert response.status_code == 200
@@ -48,7 +48,7 @@ def test_return_book(client, user_headers, available_book):
 
 
 def test_my_borrowings(client, user_headers, available_book):
-    due = (datetime.utcnow() + timedelta(days=14)).isoformat()
+    due = (datetime.now(timezone.utc) + timedelta(days=14)).isoformat()
     client.post("/borrowings/", json={"book_id": available_book.id, "due_date": due}, headers=user_headers)
     response = client.get("/borrowings/my", headers=user_headers)
     assert response.status_code == 200

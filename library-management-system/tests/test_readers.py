@@ -1,11 +1,11 @@
 import pytest
 from app.models.user import User
-from app.core.security import get_password_hash
+from app.core.security import hash_password
 
 
 @pytest.fixture
 def auth_headers(client, db):
-    user = User(email="reader@test.com", full_name="Reader", hashed_password=get_password_hash("pass"))
+    user = User(email="reader@test.com", full_name="Reader", hashed_password=hash_password("pass"))
     db.add(user)
     db.commit()
     resp = client.post("/auth/token", data={"username": "reader@test.com", "password": "pass"})

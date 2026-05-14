@@ -5,7 +5,7 @@ from sqlalchemy.orm import sessionmaker
 from app.main import app
 from app.database import Base, get_db
 from app.models.user import User
-from app.core.security import get_password_hash
+from app.core.security import hash_password
 
 SQLALCHEMY_TEST_URL = "sqlite:///./test.db"
 
@@ -43,7 +43,7 @@ def admin_user(db):
     user = User(
         email="admin@test.com",
         full_name="Admin User",
-        hashed_password=get_password_hash("adminpass"),
+        hashed_password=hash_password("adminpass"),
         is_admin=True,
     )
     db.add(user)
@@ -57,7 +57,7 @@ def regular_user(db):
     user = User(
         email="user@test.com",
         full_name="Regular User",
-        hashed_password=get_password_hash("userpass"),
+        hashed_password=hash_password("userpass"),
     )
     db.add(user)
     db.commit()

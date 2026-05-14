@@ -1,6 +1,6 @@
 from fastapi import APIRouter, Depends, HTTPException, status
 from sqlalchemy.orm import Session
-from datetime import datetime
+from datetime import datetime, timezone
 from app.database import get_db
 from app.models.borrowing import Borrowing
 from app.models.book import Book
@@ -36,7 +36,7 @@ def return_book(borrowing_id: int, db: Session = Depends(get_db), current_user: 
         raise HTTPException(status_code=404, detail="Borrowing not found")
     if borrowing.is_returned:
         raise HTTPException(status_code=400, detail="Book already returned")
-    now = datetime.utcnow()
+    now = datetime.now(timezone.utc)
     borrowing.is_returned = True
     borrowing.returned_at = now
     borrowing.book.available_copies += 1
