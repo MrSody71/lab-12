@@ -1,4 +1,5 @@
 from datetime import datetime
+
 from pydantic import BaseModel, ConfigDict, Field, field_validator
 
 _CURRENT_YEAR: int = datetime.now().year

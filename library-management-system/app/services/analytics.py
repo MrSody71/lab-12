@@ -1,13 +1,13 @@
 from datetime import datetime, timedelta, timezone
 
-_STATS_LOOKBACK_DAYS = 366  # covers 12 calendar months even in leap years
-
 from sqlalchemy import extract, func, select
 from sqlalchemy.orm import Session
 
 from app.models.book import Book
 from app.models.borrowing import Borrowing
 from app.models.fine import Fine
+
+_STATS_LOOKBACK_DAYS = 366  # covers 12 calendar months even in leap years
 
 
 class AnalyticsService:

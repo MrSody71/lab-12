@@ -1,6 +1,8 @@
 from datetime import datetime, timedelta, timezone
+
 from jose import JWTError, jwt
 from passlib.context import CryptContext
+
 from app.core.config import get_settings
 
 _pwd_context = CryptContext(schemes=["bcrypt"], deprecated="auto")

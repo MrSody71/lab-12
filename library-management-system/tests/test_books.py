@@ -14,6 +14,8 @@ Coverage
 
 from __future__ import annotations
 
+from datetime import datetime, timedelta, timezone
+
 import pytest
 from httpx import AsyncClient
 from sqlalchemy.orm import Session
@@ -124,8 +126,7 @@ async def test_create_book_duplicate_isbn(
 async def test_create_book_invalid_year(
     client: AsyncClient, admin_headers: dict[str, str]
 ) -> None:
-    """year_published more than 5 years in the future fails Pydantic validation."""
-    from datetime import datetime
+    """year_published beyond the current year fails Pydantic validation (le=_CURRENT_YEAR)."""
     future_year = datetime.now().year + 5
     response = await client.post(
         "/books/", headers=admin_headers, json=_book(year_published=future_year)
@@ -231,8 +232,6 @@ async def test_update_book_total_copies_below_borrowed(
     sample_book: Book,
 ) -> None:
     """Cannot set total_copies < currently borrowed count."""
-    from datetime import datetime, timedelta, timezone
-
     # Manually borrow 2 out of 3 copies
     sample_book.available_copies = 1
     for _ in range(2):

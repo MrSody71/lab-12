@@ -1,4 +1,4 @@
-from fastapi import APIRouter, Depends, HTTPException, status
+from fastapi import APIRouter, Depends, HTTPException, Query, status
 from sqlalchemy.orm import Session, selectinload
 
 from app.core.dependencies import get_current_admin
@@ -21,8 +21,8 @@ def _get_reader_or_404(reader_id: int, db: Session) -> User:
 
 @router.get("/", response_model=list[UserResponse])
 def list_readers(
-    skip: int = 0,
-    limit: int = 100,
+    skip: int = Query(default=0, ge=0),
+    limit: int = Query(default=100, ge=1, le=200),
     db: Session = Depends(get_db),
     _: User = Depends(get_current_admin),
 ) -> list[UserResponse]:

@@ -1,391 +1,281 @@
 # Code Review Report — Library Management System
-### Финальный ревью · 2026-05-15
+**Автор:** Артюх Виталий Валериевич  
+**Группа:** 221131  
+**Вариант:** 2  
+
+## Методология
+Код review проводился с помощью Claude Code (claude-sonnet-4-6).  
+Анализировались файлы: `app/routers/`, `app/services/`, `app/models/`, `app/core/`, `app/schemas/`  
+Критерии: безопасность, производительность, логика, стиль, обработка ошибок.
 
 ---
 
-## Структура проекта
+## Проблема 1: Деактивированный пользователь получает новый JWT-токен
 
-| Файл | Статус | Примечание |
-|------|--------|------------|
-| `app/main.py` | ✅ OK | Все 5 роутеров подключены |
-| `app/database.py` | ✅ Исправлен | Добавлен `pool_pre_ping`, `pool_size`, `max_overflow` |
-| `app/core/config.py` | ✅ OK | |
-| `app/core/security.py` | ✅ OK | |
-| `app/core/dependencies.py` | ✅ OK | |
-| `app/models/__init__.py` | ✅ OK | Все 4 модели экспортированы |
-| `app/schemas/book.py` | ✅ Исправлен | `year_published` динамический |
-| `app/schemas/user.py` | ✅ OK | |
-| `app/schemas/borrowing.py` | ✅ OK | |
-| `app/schemas/fine.py` | ✅ OK | |
-| `app/routers/auth.py` | ✅ OK | |
-| `app/routers/books.py` | ✅ Исправлен | ISBN-нормализация, `available_copies`, `IntegrityError`, лимит |
-| `app/routers/borrowings.py` | ✅ OK | |
-| `app/routers/readers.py` | ✅ OK | |
-| `app/routers/admin.py` | ✅ OK | |
-| `app/services/auth.py` | ✅ Исправлен | `is_active` при логине, IntegrityError safety net |
-| `app/services/fine_calculator.py` | ✅ OK | |
-| `app/services/analytics.py` | ✅ OK | |
-| `alembic.ini` | ✅ OK | |
-| `alembic/env.py` | ✅ OK | Читает `DATABASE_URL` из окружения |
-| `alembic/versions/001_initial.py` | ⚠️ Антипаттерн | `create_all/drop_all` вместо `op` (не исправлено — требует переписать миграцию) |
-| `Dockerfile` | ✅ Исправлен | Добавлен non-root пользователь |
-| `docker-compose.yml` | ✅ Исправлен | Убран `--reload` и dev bind-mount |
-| `docker-compose.override.yml` | ✅ Создан | Dev-настройки вынесены, добавлен в `.gitignore` |
-| `.env` | ✅ OK | В `.gitignore` — не коммитится |
-| `.gitignore` | ✅ Обновлён | Добавлен `docker-compose.override.yml` |
-| `.github/workflows/pr_review.yml` | ✅ OK | |
-| `.github/workflows/tests.yml` | ✅ OK | |
-| `.github/scripts/ai_review.py` | ✅ OK | |
-| `tests/conftest.py` | ✅ OK | |
-| `tests/test_auth.py` | ✅ Дополнен | +1 тест: логин деактивированного |
-| `tests/test_books.py` | ✅ Дополнен | +3 теста: гипенированный ISBN, delta available_copies, дублирующий ISBN |
-| `tests/test_borrowings.py` | ✅ OK | |
-| `tests/test_fine_calculator.py` | ✅ OK | |
-| `tests/test_readers.py` | ✅ OK | |
-| `pytest.ini` | ✅ OK | |
-| `requirements.txt` | ✅ OK | |
-
----
-
-## Найденные и исправленные проблемы
-
----
-
-### Проблема 1: Деактивированный пользователь получает новый JWT-токен
-
-**Файл:** `app/services/auth.py`, метод `authenticate`
-**Категория:** Безопасность
-**Риск:** Высокий
-
-**До:**
+### Что сгенерировал ИИ:
 ```python
+# app/services/auth.py
 def authenticate(self, email: str, password: str) -> User | None:
-    user = self.db.execute(select(User).where(User.email == email)).scalar_one_or_none()
+    user = self.db.execute(
+        select(User).where(User.email == email)
+    ).scalar_one_or_none()
     if user and verify_password(password, user.hashed_password):
         return user
     return None
 ```
 
-**После:**
+### В чём проблема:
+Метод `authenticate` выдаёт токен любому пользователю с правильным паролем, не проверяя поле `is_active`. При этом `get_current_user` в `dependencies.py` проверяет `is_active` для **существующих** токенов, но это не мешает деактивированному аккаунту получить **новый** токен сразу после блокировки.
+
+Реальный сценарий: администратор блокирует пользователя (`is_active = False`), но тот немедленно логинится и получает свежий JWT. Токен действует весь срок `ACCESS_TOKEN_EXPIRE_MINUTES`, обходя блокировку.
+
+### Как исправил:
 ```python
+# app/services/auth.py
 def authenticate(self, email: str, password: str) -> User | None:
-    user = self.db.execute(select(User).where(User.email == email)).scalar_one_or_none()
+    user = self.db.execute(
+        select(User).where(User.email == email)
+    ).scalar_one_or_none()
     if user and user.is_active and verify_password(password, user.hashed_password):
         return user
     return None
 ```
 
-**Пояснение:** Проверка `is_active` в `get_current_user` защищает существующие токены, но не препятствует выдаче нового токена деактивированному аккаунту — атакующий мог получить свежий JWT сразу после деактивации.
+---
+
+## Проблема 2: Гонка при регистрации — необработанный IntegrityError → HTTP 500
+
+### Что сгенерировал ИИ:
+```python
+# app/services/auth.py
+def register(self, user_data: UserCreate) -> User:
+    if self.db.execute(
+        select(User).where(User.email == user_data.email)
+    ).scalar_one_or_none():
+        raise HTTPException(400, "Email already registered")
+    if self.db.execute(
+        select(User).where(User.username == user_data.username)
+    ).scalar_one_or_none():
+        raise HTTPException(400, "Username already taken")
+
+    user = User(...)
+    self.db.add(user)
+    self.db.commit()   # IntegrityError здесь → неперехваченное исключение → HTTP 500
+    self.db.refresh(user)
+    return user
+```
+
+### В чём проблема:
+Два `SELECT` перед `INSERT` создают TOCTOU-уязвимость (Time-Of-Check / Time-Of-Use). При двух одновременных запросах с одним email оба проходят проверку, оба вызывают `INSERT`, один из них получает `IntegrityError` от базы данных. Поскольку исключение не перехватывается, FastAPI возвращает HTTP 500 с трейсбеком вместо корректного HTTP 400. В production-логах это выглядит как сбой сервера.
+
+### Как исправил:
+```python
+# app/services/auth.py
+        self.db.add(user)
+        try:
+            self.db.commit()
+        except IntegrityError:
+            self.db.rollback()
+            raise HTTPException(
+                status_code=status.HTTP_400_BAD_REQUEST,
+                detail="Email or username already taken",
+            )
+        self.db.refresh(user)
+        return user
+```
 
 ---
 
-### Проблема 2: TOCTOU race condition в `register` — два SELECT без атомарности
+## Проблема 3: Поиск по ISBN не нормализует входные данные — дефисы дают 404
 
-**Файл:** `app/services/auth.py`, метод `register`
-**Категория:** Безопасность / Логика
-**Риск:** Средний
-
-**До:**
+### Что сгенерировал ИИ:
 ```python
-# Два отдельных SELECT перед INSERT — нет блокировки между проверкой и записью
-if self.db.execute(select(User).where(User.email == user_data.email))...:
-    raise HTTPException(400, "Email already registered")
-if self.db.execute(select(User).where(User.username == user_data.username))...:
-    raise HTTPException(400, "Username already taken")
-self.db.add(user)
-self.db.commit()  # IntegrityError здесь стал бы HTTP 500
+# app/routers/books.py
+@router.get("/search/isbn/{isbn}", response_model=BookResponse)
+def search_by_isbn(isbn: str, db: Session = Depends(get_db)) -> BookResponse:
+    book = db.query(Book).filter(Book.isbn == isbn).first()
+    if not book:
+        raise HTTPException(status_code=404, detail="Book not found")
+    return book
 ```
 
-**После:**
-```python
-# Те же pre-checks для понятных сообщений об ошибке
-...
-self.db.add(user)
-try:
-    self.db.commit()
-except IntegrityError:           # safety net для гонки двух одновременных регистраций
-    self.db.rollback()
-    raise HTTPException(400, "Email or username already taken")
-```
+### В чём проблема:
+ISBN хранится в базе в нормализованном виде (только цифры, без дефисов) — это обеспечивает `field_validator` в схеме `BookCreate`. Однако при поиске по URL вида `/books/search/isbn/978-0743273565` роутер передаёт строку с дефисом напрямую в `filter`, и точное сравнение не находит запись `9780743273565`. Пользователь получает 404, хотя книга в системе есть. Это нарушение принципа наименьшего удивления: API принимает ISBN с дефисами при создании, но не принимает при поиске.
 
-**Пояснение:** При двух одновременных запросах с одним email оба проходили pre-check, один получал успех, второй — HTTP 500 (необработанный `IntegrityError`) вместо 400.
+### Как исправил:
+```python
+# app/routers/books.py
+@router.get("/search/isbn/{isbn}", response_model=BookResponse)
+def search_by_isbn(isbn: str, db: Session = Depends(get_db)) -> BookResponse:
+    """Find a book by ISBN; hyphens and spaces in the path are stripped before matching."""
+    normalized = isbn.replace("-", "").replace(" ", "")
+    book = db.query(Book).filter(Book.isbn == normalized).first()
+    if not book:
+        raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Book not found")
+    return book
+```
 
 ---
 
-### Проблема 3: `search_by_isbn` не нормализует ISBN — дефисы в URL дают 404
+## Проблема 4: available_copies не пересчитывается при изменении total_copies
 
-**Файл:** `app/routers/books.py`, функция `search_by_isbn`
-**Категория:** Логика
-**Риск:** Средний
-
-**До:**
+### Что сгенерировал ИИ:
 ```python
-book = db.query(Book).filter(Book.isbn == isbn).first()
-```
-
-**После:**
-```python
-normalized = isbn.replace("-", "").replace(" ", "")
-book = db.query(Book).filter(Book.isbn == normalized).first()
-```
-
-**Пояснение:** ISBN хранится нормализованным (только цифры), но поиск по URL `978-0743273565` делал точное сравнение со строкой с дефисом — книга не находилась.
-
----
-
-### Проблема 4: `update_book` не корректирует `available_copies` при изменении `total_copies`
-
-**Файл:** `app/routers/books.py`, функция `update_book`
-**Категория:** Логика
-**Риск:** Высокий
-
-**До:**
-```python
-if update_data["total_copies"] < currently_borrowed:
-    raise HTTPException(400, ...)
-# available_copies не изменялся — дельта экземпляров «терялась»
-for field, value in update_data.items():
-    setattr(book, field, value)
-```
-
-**После:**
-```python
-new_total = update_data["total_copies"]
-if new_total < currently_borrowed:
-    raise HTTPException(400, ...)
-# Синхронизируем available_copies: старое_значение + дельта
-update_data["available_copies"] = book.available_copies + (new_total - book.total_copies)
-for field, value in update_data.items():
-    setattr(book, field, value)
-```
-
-**Пояснение:** Если библиотека докупала 2 экземпляра (`total_copies` 3→5), `available_copies` оставалось равным 3 — 2 физических книги «исчезали» из системы.
-
----
-
-### Проблема 5: `update_book` — `IntegrityError` при смене ISBN → HTTP 500
-
-**Файл:** `app/routers/books.py`, функция `update_book`
-**Категория:** Логика / Качество
-**Риск:** Средний
-
-**До:**
-```python
-for field, value in update_data.items():
-    setattr(book, field, value)
-db.commit()  # IntegrityError → unhandled → HTTP 500 с трейсбеком
-```
-
-**После:**
-```python
-for field, value in update_data.items():
-    setattr(book, field, value)
-try:
+# app/routers/books.py
+def update_book(...):
+    update_data = book_in.model_dump(exclude_unset=True)
+    if "total_copies" in update_data:
+        currently_borrowed = book.total_copies - book.available_copies
+        if update_data["total_copies"] < currently_borrowed:
+            raise HTTPException(400, "Cannot reduce total_copies below borrowed count")
+    # available_copies не изменяется — дельта новых экземпляров теряется
+    for field, value in update_data.items():
+        setattr(book, field, value)
     db.commit()
-except IntegrityError:
-    db.rollback()
-    raise HTTPException(400, "A book with this ISBN already exists")
 ```
 
-**Пояснение:** `create_book` уже обрабатывал `IntegrityError`, но `update_book` — нет; попытка установить уже существующий ISBN возвращала 500.
+### В чём проблема:
+Если библиотека докупает 2 экземпляра книги и администратор обновляет `total_copies` с 3 до 5, поле `available_copies` остаётся равным 3. В системе числится 5 копий всего, но только 3 доступных — 2 физические книги «исчезают». Читатели не могут их взять, хотя книги стоят на полке. При следующем возврате borrowed-книги `available_copies` может превысить `total_copies`, сломав инварианты данных.
+
+### Как исправил:
+```python
+# app/routers/books.py
+    update_data = book_in.model_dump(exclude_unset=True)
+    if "total_copies" in update_data:
+        currently_borrowed = book.total_copies - book.available_copies
+        new_total = update_data["total_copies"]
+        if new_total < currently_borrowed:
+            raise HTTPException(
+                status_code=status.HTTP_400_BAD_REQUEST,
+                detail=f"Cannot reduce total_copies below currently borrowed count ({currently_borrowed})",
+            )
+        # Синхронизируем available_copies: прибавляем ту же дельту, что и total_copies
+        update_data["available_copies"] = book.available_copies + (new_total - book.total_copies)
+    for field, value in update_data.items():
+        setattr(book, field, value)
+```
 
 ---
 
-### Проблема 6: `list_books` принимает неограниченный `limit` — DoS через огромную выборку
+## Проблема 5: Изменение ISBN на существующий → необработанный IntegrityError → HTTP 500
 
-**Файл:** `app/routers/books.py`, функция `list_books`
-**Категория:** Производительность
-**Риск:** Средний
-
-**До:**
+### Что сгенерировал ИИ:
 ```python
-skip: int = 0,
-limit: int = 100,
+# app/routers/books.py
+    for field, value in update_data.items():
+        setattr(book, field, value)
+    db.commit()           # IntegrityError при дублирующем ISBN → HTTP 500
+    db.refresh(book)
+    return book
 ```
 
-**После:**
-```python
-skip: int = Query(default=0, ge=0),
-limit: int = Query(default=100, ge=1, le=200),
-```
+### В чём проблема:
+Функция `create_book` обрабатывала `IntegrityError` и возвращала HTTP 400, но `update_book` — нет. При попытке установить ISBN, уже занятый другой книгой, SQLAlchemy бросает `sqlalchemy.exc.IntegrityError`, FastAPI не перехватывает его на уровне роутера, и клиент получает HTTP 500 с внутренним трейсбеком. Это и утечка информации о внутреннем устройстве системы, и некорректный статус-код.
 
-**Пояснение:** Без `le=` любой пользователь мог запросить `?limit=1000000`, вызвав полный table scan и OOM-ситуацию.
+### Как исправил:
+```python
+# app/routers/books.py
+    for field, value in update_data.items():
+        setattr(book, field, value)
+    try:
+        db.commit()
+    except IntegrityError:
+        db.rollback()
+        raise HTTPException(
+            status_code=status.HTTP_400_BAD_REQUEST,
+            detail="A book with this ISBN already exists",
+        )
+    db.refresh(book)
+    return book
+```
 
 ---
 
-### Проблема 7: `lifespan` вызывает `create_all` — обходит Alembic в продакшне
+## Проблема 6: Неограниченный параметр limit — потенциальный DoS
 
-**Файл:** `app/main.py`, функция `lifespan`
-**Категория:** Логика / DevOps
-**Риск:** Высокий
-
-**До:**
+### Что сгенерировал ИИ:
 ```python
-@asynccontextmanager
-async def lifespan(app: FastAPI) -> AsyncGenerator[None, None]:
-    Base.metadata.create_all(bind=engine)
-    yield
+# app/routers/books.py
+@router.get("/", response_model=list[BookResponse])
+def list_books(
+    query: str | None = None,
+    author: str | None = None,
+    genre: str | None = None,
+    available_only: bool = False,
+    skip: int = 0,
+    limit: int = 100,
+    db: Session = Depends(get_db),
+) -> list[BookResponse]:
 ```
 
-**После:**
-```python
-@asynccontextmanager
-async def lifespan(app: FastAPI) -> AsyncGenerator[None, None]:
-    # Schema is managed by Alembic migrations (`alembic upgrade head`).
-    # Never call create_all() here — it bypasses migration history and causes
-    # race conditions when multiple app instances start simultaneously.
-    yield
-```
+### В чём проблема:
+Параметры `skip` и `limit` принимаются как обычные `int` без ограничений. Любой анонимный клиент может отправить запрос `GET /books/?limit=10000000`, что вызовет полный table scan на миллионе строк, исчерпает память приложения и сделает сервис недоступным для других пользователей. Также `skip=-1` или `limit=0` привели бы к некорректному поведению SQL-запроса.
 
-**Пояснение:** `create_all` при старте нескольких инстансов одновременно создаёт race condition; при наличии Alembic он должен быть единственным источником изменений схемы.
+### Как исправил:
+```python
+# app/routers/books.py
+from fastapi import APIRouter, Depends, HTTPException, Query, status
+
+@router.get("/", response_model=list[BookResponse])
+def list_books(
+    query: str | None = None,
+    author: str | None = None,
+    genre: str | None = None,
+    available_only: bool = False,
+    skip: int = Query(default=0, ge=0),
+    limit: int = Query(default=100, ge=1, le=200),
+    db: Session = Depends(get_db),
+) -> list[BookResponse]:
+```
 
 ---
 
-### Проблема 8: `year_published` захардкожен `le=2025` — блокирует добавление книг в 2026+
+## Проблема 7: Поле year_published захардкожено le=2025 — система ломается с 1 января 2026
 
-**Файл:** `app/schemas/book.py`
-**Категория:** Логика / Качество
-**Риск:** Средний
-
-**До:**
+### Что сгенерировал ИИ:
 ```python
-year_published: int | None = Field(default=None, ge=1000, le=2025)
+# app/schemas/book.py
+class BookBase(BaseModel):
+    year_published: int | None = Field(default=None, ge=1000, le=2025)
+
+class BookCreate(BookBase):
+    genre: str
+    year_published: int = Field(ge=1000, le=2025)
+
+class BookUpdate(BaseModel):
+    year_published: int | None = Field(default=None, ge=1000, le=2025)
 ```
 
-**После:**
+### В чём проблема:
+Жёстко заданный верхний предел `le=2025` означает, что 1 января 2026 года ни одна новая книга не пройдёт Pydantic-валидацию при добавлении в систему. Все запросы `POST /books/` с `year_published=2026` будут возвращать HTTP 422. Ошибка не требует изменений в коде для воспроизведения — она произойдёт автоматически при смене года.
+
+### Как исправил:
 ```python
-_CURRENT_YEAR: int = datetime.now().year
-...
-year_published: int | None = Field(default=None, ge=1000, le=_CURRENT_YEAR)
-```
+# app/schemas/book.py
+from datetime import datetime
 
-**Пояснение:** Захардкоженный 2025 превратил бы систему в нерабочую с 1 января 2026 — ни одна новая книга не прошла бы валидацию.
+_CURRENT_YEAR: int = datetime.now().year  # вычисляется один раз при старте приложения
+
+class BookBase(BaseModel):
+    year_published: int | None = Field(default=None, ge=1000, le=_CURRENT_YEAR)
+
+class BookCreate(BookBase):
+    genre: str
+    year_published: int = Field(ge=1000, le=_CURRENT_YEAR)
+
+class BookUpdate(BaseModel):
+    year_published: int | None = Field(default=None, ge=1000, le=_CURRENT_YEAR)
+```
 
 ---
 
-### Проблема 9: Нет `pool_pre_ping` — приложение падает после перезапуска БД
+## Итоговая таблица
 
-**Файл:** `app/database.py`
-**Категория:** Производительность / Надёжность
-**Риск:** Средний
-
-**До:**
-```python
-engine = create_engine(get_settings().DATABASE_URL)
-```
-
-**После:**
-```python
-engine = create_engine(
-    get_settings().DATABASE_URL,
-    pool_pre_ping=True,
-    pool_size=5,
-    max_overflow=10,
-)
-```
-
-**Пояснение:** Без `pool_pre_ping` SQLAlchemy использует соединения из пула, которые могут быть закрыты со стороны PostgreSQL (рестарт, timeout) — следующий запрос получает `OperationalError` вместо прозрачного переподключения.
-
----
-
-### Проблема 10: `Dockerfile` запускает процесс от root
-
-**Файл:** `Dockerfile`
-**Категория:** DevOps / Безопасность
-**Риск:** Высокий
-
-**До:**
-```dockerfile
-COPY . .
-EXPOSE 8000
-CMD ["uvicorn", ...]
-```
-
-**После:**
-```dockerfile
-COPY . .
-
-RUN addgroup --system --gid 1001 appgroup \
-    && adduser --system --uid 1001 --ingroup appgroup appuser \
-    && chown -R appuser:appgroup /app
-USER appuser
-
-EXPOSE 8000
-CMD ["uvicorn", ...]
-```
-
-**Пояснение:** Процесс от root внутри контейнера при успешном container-escape даёт атакующему root на хосте; минимальные привилегии — обязательный уровень защиты для продакшн-образов.
-
----
-
-### Проблема 11: `docker-compose.yml` использует `--reload` и dev bind-mount в продакшне
-
-**Файл:** `docker-compose.yml`
-**Категория:** DevOps
-**Риск:** Высокий
-
-**До:**
-```yaml
-volumes:
-  - .:/app            # перезаписывает образ хостовым кодом
-command: >
-  sh -c "alembic upgrade head &&
-         uvicorn app.main:app --host 0.0.0.0 --port 8000 --reload"
-```
-
-**После (`docker-compose.yml` — продакшн):**
-```yaml
-# volumes убран
-command: >
-  sh -c "alembic upgrade head &&
-         uvicorn app.main:app --host 0.0.0.0 --port 8000 --workers 2"
-```
-
-**Dev-настройки вынесены в `docker-compose.override.yml`** (добавлен в `.gitignore`):
-```yaml
-services:
-  app:
-    volumes:
-      - .:/app
-    command: >
-      sh -c "alembic upgrade head &&
-             uvicorn app.main:app --host 0.0.0.0 --port 8000 --reload"
-```
-
-**Пояснение:** `--reload` запускает файловый watcher (CPU overhead, security surface); bind-mount `.:/app` полностью заменяет иммутабельный образ изменяемой хост-файловой системой — нивелирует всё преимущество multi-stage build.
-
----
-
-## Сводная таблица
-
-| Категория | Найдено | Исправлено | Критических (Высоких) |
-|-----------|---------|------------|----------------------|
-| Безопасность | 2 | 2 | 1 |
-| Производительность | 2 | 2 | 0 |
-| Логика | 4 | 4 | 2 |
-| Качество кода | 1 | 1 | 0 |
-| Тесты | 0 | — | — |
-| DevOps | 2 | 2 | 2 |
-| **Итого** | **11** | **11** | **5** |
-
-> Дополнительно выявлен антипаттерн в `alembic/versions/001_initial.py` (использует `create_all/drop_all` вместо `op.create_table`). Не исправлен в рамках этого ревью — требует полного переписывания файла миграции.
-
----
-
-## Покрытие тестами
-
-- **До ревью (оценка):** ~85% (на основе анализа кода)
-- **После ревью:** ~88% (добавлено 4 новых теста на исправленную логику)
-- **Непокрытые области:**
-  - `alembic/` — миграции не тестируются pytest (норма, тестируются интеграционно)
-  - `alembic/versions/001_initial.py` — `downgrade()` не тестируется
-  - `app/main.py` — `health_check()` не покрыт тестом (тривиально, низкий приоритет)
-
-### Добавленные тесты
-
-| Тест | Файл | Что проверяет |
-|------|------|---------------|
-| `test_login_deactivated_user_is_rejected` | `test_auth.py` | `authenticate` проверяет `is_active` при логине |
-| `test_search_by_isbn_with_hyphens` | `test_books.py` | Нормализация ISBN в поиске |
-| `test_update_book_total_copies_increase_adjusts_available` | `test_books.py` | Корректировка `available_copies` при росте `total_copies` |
-| `test_update_book_duplicate_isbn_returns_400` | `test_books.py` | `IntegrityError` при смене ISBN → 400 |
+| Категория | Найдено | Исправлено |
+|-----------|---------|------------|
+| Логические ошибки | 2 | 2 |
+| Уязвимости безопасности | 2 | 2 |
+| Производительность | 1 | 1 |
+| Стиль кода | 1 | 1 |
+| Обработка исключений | 1 | 1 |
+| **Итого** | **7** | **7** |

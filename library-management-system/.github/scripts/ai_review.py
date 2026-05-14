@@ -34,7 +34,7 @@ import urllib.request
 
 DIFF_FILE = "pr_diff.txt"
 MAX_DIFF_LINES = 4000
-MODEL = "claude-sonnet-4-20250514"
+MODEL = "claude-sonnet-4-6"
 
 SYSTEM_PROMPT = (
     "Ты — senior Python code reviewer. "
