@@ -133,3 +133,66 @@ def test_return_type_is_float() -> None:
     returned = _BASE + timedelta(days=1)
     result = calculate_fine(_BASE, returned, FINE_PER_DAY)
     assert isinstance(result, float)
+
+
+# ── analytics service: dead-code coverage ────────────────────────────────────
+
+from sqlalchemy.orm import Session  # noqa: E402
+
+from app.models.book import Book  # noqa: E402
+from app.models.borrowing import Borrowing  # noqa: E402
+from app.models.fine import Fine  # noqa: E402
+from app.models.user import User  # noqa: E402
+from app.services.analytics import AnalyticsService  # noqa: E402
+
+
+def test_analytics_fines_summary_empty_db(db_session: Session) -> None:
+    result = AnalyticsService(db_session).get_fines_summary()
+    assert result == {"total": 0.0, "paid": 0.0, "unpaid": 0.0}
+
+
+def test_analytics_fines_summary_with_paid_and_unpaid(db_session: Session) -> None:
+    book1 = Book(title="B1", author="A", isbn="9780000000011", genre="G",
+                 year_published=2000, total_copies=2, available_copies=2)
+    book2 = Book(title="B2", author="A", isbn="9780000000012", genre="G",
+                 year_published=2000, total_copies=2, available_copies=2)
+    user = User(email="fsummary@test.com", username="fsummary",
+                hashed_password="x", is_active=True, is_admin=False)
+    db_session.add_all([book1, book2, user])
+    db_session.flush()
+
+    due = datetime.now(timezone.utc) - timedelta(days=1)
+    b1 = Borrowing(book_id=book1.id, reader_id=user.id, due_date=due)
+    b2 = Borrowing(book_id=book2.id, reader_id=user.id, due_date=due)
+    db_session.add_all([b1, b2])
+    db_session.flush()
+
+    db_session.add(Fine(borrowing_id=b1.id, amount=30.0, is_paid=True))
+    db_session.add(Fine(borrowing_id=b2.id, amount=20.0, is_paid=False))
+    db_session.commit()
+
+    result = AnalyticsService(db_session).get_fines_summary()
+    assert result["total"] == 50.0
+    assert result["paid"] == 30.0
+    assert result["unpaid"] == 20.0
+
+
+def test_analytics_get_overdue_service_empty(db_session: Session) -> None:
+    assert AnalyticsService(db_session).get_overdue_borrowings() == []
+
+
+def test_analytics_get_overdue_service_with_data(db_session: Session) -> None:
+    book = Book(title="Overdue", author="A", isbn="9780000000013", genre="G",
+                year_published=2000, total_copies=1, available_copies=0)
+    user = User(email="foverdue@test.com", username="foverdue",
+                hashed_password="x", is_active=True, is_admin=False)
+    db_session.add_all([book, user])
+    db_session.flush()
+
+    due = datetime.now(timezone.utc) - timedelta(days=3)
+    borrowing = Borrowing(book_id=book.id, reader_id=user.id, due_date=due, is_returned=False)
+    db_session.add(borrowing)
+    db_session.commit()
+
+    result = AnalyticsService(db_session).get_overdue_borrowings()
+    assert borrowing.id in [b.id for b in result]

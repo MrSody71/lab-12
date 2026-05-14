@@ -273,3 +273,112 @@ async def test_filter_by_title_query(
     )
     assert response.status_code == 200
     assert any(b["id"] == sample_book.id for b in response.json())
+
+
+# ── readers endpoints ─────────────────────────────────────────────────────────
+
+from app.models.user import User  # noqa: E402
+
+
+async def test_list_readers_as_admin(
+    client: AsyncClient,
+    admin_headers: dict[str, str],
+    regular_user: User,
+) -> None:
+    response = await client.get("/readers/", headers=admin_headers)
+    assert response.status_code == 200
+    ids = [u["id"] for u in response.json()]
+    assert regular_user.id in ids
+
+
+async def test_list_readers_excludes_admins(
+    client: AsyncClient,
+    admin_headers: dict[str, str],
+    admin_user: User,
+    regular_user: User,
+) -> None:
+    response = await client.get("/readers/", headers=admin_headers)
+    assert response.status_code == 200
+    ids = [u["id"] for u in response.json()]
+    assert admin_user.id not in ids
+    assert regular_user.id in ids
+
+
+async def test_list_readers_requires_admin(
+    client: AsyncClient,
+    auth_headers: dict[str, str],
+) -> None:
+    response = await client.get("/readers/", headers=auth_headers)
+    assert response.status_code == 403
+
+
+async def test_get_reader_by_id(
+    client: AsyncClient,
+    admin_headers: dict[str, str],
+    regular_user: User,
+) -> None:
+    response = await client.get(f"/readers/{regular_user.id}", headers=admin_headers)
+    assert response.status_code == 200
+    assert response.json()["id"] == regular_user.id
+
+
+async def test_get_reader_not_found(
+    client: AsyncClient,
+    admin_headers: dict[str, str],
+) -> None:
+    response = await client.get("/readers/99999", headers=admin_headers)
+    assert response.status_code == 404
+
+
+async def test_get_reader_admin_is_not_reader(
+    client: AsyncClient,
+    admin_headers: dict[str, str],
+    admin_user: User,
+) -> None:
+    """Admin's own ID is excluded by the is_admin=False filter → 404."""
+    response = await client.get(f"/readers/{admin_user.id}", headers=admin_headers)
+    assert response.status_code == 404
+
+
+async def test_get_reader_stats_empty(
+    client: AsyncClient,
+    admin_headers: dict[str, str],
+    regular_user: User,
+) -> None:
+    response = await client.get(f"/readers/{regular_user.id}/stats", headers=admin_headers)
+    assert response.status_code == 200
+    data = response.json()
+    assert data["total_borrowed"] == 0
+    assert data["currently_borrowed"] == 0
+    assert data["total_fines"] == 0.0
+    assert data["unpaid_fines"] == 0.0
+
+
+async def test_get_reader_stats_with_borrowings(
+    client: AsyncClient,
+    admin_headers: dict[str, str],
+    borrowed_book: Borrowing,
+    regular_user: User,
+) -> None:
+    response = await client.get(f"/readers/{regular_user.id}/stats", headers=admin_headers)
+    assert response.status_code == 200
+    data = response.json()
+    assert data["total_borrowed"] == 1
+    assert data["currently_borrowed"] == 1
+
+
+async def test_get_reader_borrowings(
+    client: AsyncClient,
+    admin_headers: dict[str, str],
+    borrowed_book: Borrowing,
+    regular_user: User,
+) -> None:
+    response = await client.get(
+        f"/readers/{regular_user.id}/borrowings", headers=admin_headers
+    )
+    assert response.status_code == 200
+    data = response.json()
+    assert len(data) == 1
+    assert data[0]["id"] == borrowed_book.id
+    assert "book" in data[0]
+    assert "reader" in data[0]

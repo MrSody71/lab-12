@@ -155,3 +155,60 @@ async def test_get_me_deactivated_user(
 
     response = await client.get("/auth/me", headers=auth_headers)
     assert response.status_code == 401
+
+
+# ── security: unit tests ──────────────────────────────────────────────────────
+
+from datetime import timedelta as _td  # noqa: E402
+
+from app.core.security import (  # noqa: E402
+    create_access_token,
+    decode_token,
+    hash_password,
+    verify_password,
+)
+
+
+def test_hash_and_verify_password() -> None:
+    hashed = hash_password("mysecretpass")
+    assert hashed != "mysecretpass"
+    assert verify_password("mysecretpass", hashed) is True
+    assert verify_password("wrongpass", hashed) is False
+
+
+def test_create_and_decode_token() -> None:
+    token = create_access_token({"sub": "42"})
+    payload = decode_token(token)
+    assert payload is not None
+    assert payload["sub"] == "42"
+
+
+def test_decode_invalid_token() -> None:
+    assert decode_token("this.is.not.valid") is None
+
+
+def test_create_token_custom_expiry() -> None:
+    token = create_access_token({"sub": "99"}, expires_delta=_td(hours=2))
+    payload = decode_token(token)
+    assert payload is not None
+    assert payload["sub"] == "99"
+
+
+async def test_get_me_malformed_jwt_sub(client: AsyncClient) -> None:
+    """JWT with non-integer sub hits the int() ValueError guard → 401."""
+    token = create_access_token({"sub": "not-a-number"})
+    response = await client.get(
+        "/auth/me",
+        headers={"Authorization": f"Bearer {token}"},
+    )
+    assert response.status_code == 401
+
+
+async def test_get_me_expired_token(client: AsyncClient) -> None:
+    """Expired JWT is rejected by decode_token (JWTError) → 401."""
+    token = create_access_token({"sub": "1"}, expires_delta=_td(seconds=-1))
+    response = await client.get(
+        "/auth/me",
+        headers={"Authorization": f"Bearer {token}"},
+    )
+    assert response.status_code == 401

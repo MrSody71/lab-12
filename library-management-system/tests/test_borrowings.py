@@ -330,3 +330,169 @@ async def test_get_overdue_as_user(
     """Non-admin access to the overdue list returns 403."""
     response = await client.get("/borrowings/overdue", headers=auth_headers)
     assert response.status_code == 403
+
+
+# ── admin analytics & fines endpoints ─────────────────────────────────────────
+
+from app.services.analytics import AnalyticsService  # noqa: E402
+
+
+def _make_fine(db: Session, borrowing: Borrowing, amount: float = 50.0) -> Fine:
+    """Insert a Fine row directly into the DB."""
+    fine = Fine(borrowing_id=borrowing.id, amount=amount)
+    db.add(fine)
+    db.commit()
+    db.refresh(fine)
+    return fine
+
+
+async def test_admin_top_books_empty(
+    client: AsyncClient,
+    admin_headers: dict[str, str],
+) -> None:
+    response = await client.get("/admin/analytics/top-books", headers=admin_headers)
+    assert response.status_code == 200
+    assert response.json() == []
+
+
+async def test_admin_top_books_with_data(
+    client: AsyncClient,
+    admin_headers: dict[str, str],
+    borrowed_book: Borrowing,
+    sample_book: Book,
+) -> None:
+    response = await client.get("/admin/analytics/top-books", headers=admin_headers)
+    assert response.status_code == 200
+    data = response.json()
+    assert len(data) >= 1
+    assert data[0]["title"] == sample_book.title
+    assert data[0]["borrow_count"] >= 1
+
+
+async def test_admin_top_books_requires_admin(
+    client: AsyncClient,
+    auth_headers: dict[str, str],
+) -> None:
+    response = await client.get("/admin/analytics/top-books", headers=auth_headers)
+    assert response.status_code == 403
+
+
+async def test_admin_monthly_stats_empty(
+    client: AsyncClient,
+    admin_headers: dict[str, str],
+) -> None:
+    response = await client.get("/admin/analytics/monthly", headers=admin_headers)
+    assert response.status_code == 200
+    assert response.json() == []
+
+
+async def test_admin_monthly_stats_with_data(
+    client: AsyncClient,
+    admin_headers: dict[str, str],
+    borrowed_book: Borrowing,
+) -> None:
+    response = await client.get("/admin/analytics/monthly", headers=admin_headers)
+    assert response.status_code == 200
+    data = response.json()
+    assert len(data) >= 1
+    entry = data[0]
+    assert "year" in entry
+    assert "month" in entry
+    assert "count" in entry
+
+
+async def test_admin_monthly_stats_requires_admin(
+    client: AsyncClient,
+    auth_headers: dict[str, str],
+) -> None:
+    response = await client.get("/admin/analytics/monthly", headers=auth_headers)
+    assert response.status_code == 403
+
+
+async def test_admin_list_unpaid_fines_empty(
+    client: AsyncClient,
+    admin_headers: dict[str, str],
+) -> None:
+    response = await client.get("/admin/fines", headers=admin_headers)
+    assert response.status_code == 200
+    assert response.json() == []
+
+
+async def test_admin_list_unpaid_fines_with_data(
+    client: AsyncClient,
+    admin_headers: dict[str, str],
+    db_session: Session,
+    borrowed_book: Borrowing,
+) -> None:
+    _make_fine(db_session, borrowed_book, amount=25.0)
+    response = await client.get("/admin/fines", headers=admin_headers)
+    assert response.status_code == 200
+    data = response.json()
+    assert len(data) == 1
+    assert data[0]["amount"] == 25.0
+    assert data[0]["is_paid"] is False
+
+
+async def test_admin_list_fines_requires_admin(
+    client: AsyncClient,
+    auth_headers: dict[str, str],
+) -> None:
+    response = await client.get("/admin/fines", headers=auth_headers)
+    assert response.status_code == 403
+
+
+async def test_admin_pay_fine_success(
+    client: AsyncClient,
+    admin_headers: dict[str, str],
+    db_session: Session,
+    borrowed_book: Borrowing,
+) -> None:
+    fine = _make_fine(db_session, borrowed_book)
+    response = await client.post(f"/admin/fines/{fine.id}/pay", headers=admin_headers)
+    assert response.status_code == 200
+    data = response.json()
+    assert data["is_paid"] is True
+    assert data["paid_at"] is not None
+
+
+async def test_admin_pay_fine_already_paid(
+    client: AsyncClient,
+    admin_headers: dict[str, str],
+    db_session: Session,
+    borrowed_book: Borrowing,
+) -> None:
+    fine = _make_fine(db_session, borrowed_book)
+    await client.post(f"/admin/fines/{fine.id}/pay", headers=admin_headers)
+    response = await client.post(f"/admin/fines/{fine.id}/pay", headers=admin_headers)
+    assert response.status_code == 400
+    assert "already paid" in response.json()["detail"].lower()
+
+
+async def test_admin_pay_fine_not_found(
+    client: AsyncClient,
+    admin_headers: dict[str, str],
+) -> None:
+    response = await client.post("/admin/fines/99999/pay", headers=admin_headers)
+    assert response.status_code == 404
+
+
+async def test_admin_pay_fine_requires_admin(
+    client: AsyncClient,
+    auth_headers: dict[str, str],
+    db_session: Session,
+    borrowed_book: Borrowing,
+) -> None:
+    fine = _make_fine(db_session, borrowed_book)
+    response = await client.post(f"/admin/fines/{fine.id}/pay", headers=auth_headers)
+    assert response.status_code == 403
+
+
+async def test_analytics_overdue_borrowings_service(
+    db_session: Session,
+    sample_book: Book,
+    regular_user: User,
+) -> None:
+    overdue = _make_overdue_borrowing(db_session, sample_book, regular_user, days_overdue=2)
+    result = AnalyticsService(db_session).get_overdue_borrowings()
+    ids = [b.id for b in result]
+    assert overdue.id in ids
