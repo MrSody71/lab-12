@@ -1,51 +1,157 @@
-﻿def test_register_user(client):
-    response = client.post("/auth/register", json={
-        "email": "new@test.com",
+"""
+Tests for /auth/* endpoints.
+
+Coverage
+--------
+- POST /auth/register  — success, duplicate email/username, validation errors
+- POST /auth/login     — success, wrong password, nonexistent user
+- GET  /auth/me        — authorized, deactivated, no token, invalid token
+"""
+
+from __future__ import annotations
+
+import pytest
+from httpx import AsyncClient
+from sqlalchemy.orm import Session
+
+from app.models.user import User
+
+
+# ── helpers ───────────────────────────────────────────────────────────────────
+
+def _reg(**overrides: object) -> dict:
+    """Return a valid registration payload with optional field overrides."""
+    return {
+        "email": "new@example.com",
         "username": "newuser",
         "full_name": "New User",
-        "password": "secret123",
-    })
+        "password": "securepass123",
+        **overrides,
+    }
+
+
+# ── registration ──────────────────────────────────────────────────────────────
+
+async def test_register_success(client: AsyncClient) -> None:
+    response = await client.post("/auth/register", json=_reg())
     assert response.status_code == 201
     data = response.json()
-    assert data["email"] == "new@test.com"
+    assert data["email"] == "new@example.com"
     assert data["username"] == "newuser"
+    assert data["is_admin"] is False
+    assert data["is_active"] is True
     assert "id" in data
+    assert "hashed_password" not in data
 
 
-def test_register_duplicate_email(client):
-    payload = {"email": "dup@test.com", "username": "dupuser", "full_name": "Dup", "password": "password1"}
-    client.post("/auth/register", json=payload)
-    response = client.post("/auth/register", json=payload)
+async def test_register_duplicate_email(
+    client: AsyncClient, regular_user: User
+) -> None:
+    response = await client.post(
+        "/auth/register",
+        json=_reg(email=regular_user.email, username="otherusername"),
+    )
     assert response.status_code == 400
+    assert "Email" in response.json()["detail"]
 
 
-def test_register_password_too_short(client):
-    response = client.post("/auth/register", json={
-        "email": "short@test.com", "username": "shortpw", "full_name": "Short", "password": "abc",
-    })
+async def test_register_duplicate_username(
+    client: AsyncClient, regular_user: User
+) -> None:
+    response = await client.post(
+        "/auth/register",
+        json=_reg(email="unique@example.com", username=regular_user.username),
+    )
+    assert response.status_code == 400
+    assert "Username" in response.json()["detail"]
+
+
+@pytest.mark.parametrize(
+    "field,bad_value",
+    [
+        ("password", "short"),       # 5 chars, below min_length=8
+        ("password", "1234567"),     # 7 chars, still below min_length=8
+        ("username", "ab"),          # 2 chars, below min_length=3
+        ("email",    "not-an-email"),
+    ],
+    ids=["pw_5ch", "pw_7ch", "username_2ch", "bad_email"],
+)
+async def test_register_short_password(
+    client: AsyncClient, field: str, bad_value: str
+) -> None:
+    """Any Pydantic validation failure must return 422."""
+    response = await client.post("/auth/register", json=_reg(**{field: bad_value}))
     assert response.status_code == 422
 
 
-def test_register_username_too_short(client):
-    response = client.post("/auth/register", json={
-        "email": "xy@test.com", "username": "xy", "full_name": "XY", "password": "validpass",
-    })
-    assert response.status_code == 422
+# ── login ─────────────────────────────────────────────────────────────────────
 
-
-def test_login_success(client):
-    client.post("/auth/register", json={
-        "email": "a@test.com", "username": "usera", "full_name": "A", "password": "password1",
-    })
-    response = client.post("/auth/login", data={"username": "a@test.com", "password": "password1"})
+async def test_login_success(client: AsyncClient, regular_user: User) -> None:
+    response = await client.post(
+        "/auth/login",
+        data={"username": regular_user.email, "password": "password123"},
+    )
     assert response.status_code == 200
-    assert "access_token" in response.json()
+    body = response.json()
+    assert "access_token" in body
+    assert body["token_type"] == "bearer"
+    assert len(body["access_token"]) > 20
 
 
-def test_login_wrong_password(client):
-    client.post("/auth/register", json={
-        "email": "b@test.com", "username": "userb", "full_name": "B", "password": "password1",
-    })
-    response = client.post("/auth/login", data={"username": "b@test.com", "password": "wrongpass"})
+async def test_login_wrong_password(client: AsyncClient, regular_user: User) -> None:
+    response = await client.post(
+        "/auth/login",
+        data={"username": regular_user.email, "password": "wrongpass999"},
+    )
+    assert response.status_code == 401
+    assert "WWW-Authenticate" in response.headers
+
+
+async def test_login_nonexistent_user(client: AsyncClient) -> None:
+    response = await client.post(
+        "/auth/login",
+        data={"username": "ghost@example.com", "password": "password123"},
+    )
     assert response.status_code == 401
 
+
+# ── /auth/me ──────────────────────────────────────────────────────────────────
+
+async def test_get_me_authorized(
+    client: AsyncClient,
+    auth_headers: dict[str, str],
+    regular_user: User,
+) -> None:
+    response = await client.get("/auth/me", headers=auth_headers)
+    assert response.status_code == 200
+    data = response.json()
+    assert data["email"] == regular_user.email
+    assert data["username"] == regular_user.username
+    assert data["is_admin"] is False
+
+
+async def test_get_me_no_token(client: AsyncClient) -> None:
+    response = await client.get("/auth/me")
+    assert response.status_code == 401
+
+
+async def test_get_me_invalid_token(client: AsyncClient) -> None:
+    response = await client.get(
+        "/auth/me",
+        headers={"Authorization": "Bearer this.is.not.a.valid.jwt"},
+    )
+    assert response.status_code == 401
+
+
+async def test_get_me_deactivated_user(
+    client: AsyncClient,
+    auth_headers: dict[str, str],
+    regular_user: User,
+    db_session: Session,
+) -> None:
+    """A valid token for a deactivated account must be rejected (is_active fix)."""
+    regular_user.is_active = False
+    db_session.commit()
+
+    response = await client.get("/auth/me", headers=auth_headers)
+    assert response.status_code == 401

@@ -1,4 +1,5 @@
 from fastapi import APIRouter, Depends, HTTPException, status
+from sqlalchemy.exc import IntegrityError
 from sqlalchemy.orm import Session
 
 from app.core.dependencies import get_current_admin
@@ -62,7 +63,14 @@ def create_book(
     data = book_in.model_dump()
     book = Book(**data, available_copies=data["total_copies"])
     db.add(book)
-    db.commit()
+    try:
+        db.commit()
+    except IntegrityError:
+        db.rollback()
+        raise HTTPException(
+            status_code=status.HTTP_400_BAD_REQUEST,
+            detail="A book with this ISBN already exists",
+        )
     db.refresh(book)
     return book
 

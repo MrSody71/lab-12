@@ -90,13 +90,11 @@ def return_book(
     current_user: User = Depends(get_current_user),
 ) -> BorrowingResponse:
     """Return a borrowed book and calculate fine if overdue."""
-    borrowing = (
-        db.query(Borrowing)
-        .filter(Borrowing.id == borrowing_id, Borrowing.reader_id == current_user.id)
-        .first()
-    )
+    borrowing = db.query(Borrowing).filter(Borrowing.id == borrowing_id).first()
     if not borrowing:
         raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Borrowing not found")
+    if borrowing.reader_id != current_user.id:
+        raise HTTPException(status_code=status.HTTP_403_FORBIDDEN, detail="Not your borrowing")
     if borrowing.is_returned:
         raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail="Book already returned")
 
