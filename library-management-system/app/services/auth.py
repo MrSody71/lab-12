@@ -1,5 +1,6 @@
 from fastapi import HTTPException, status
 from sqlalchemy import select
+from sqlalchemy.exc import IntegrityError
 from sqlalchemy.orm import Session
 
 from app.core.security import create_access_token, hash_password, verify_password
@@ -12,6 +13,7 @@ class AuthService:
         self.db = db
 
     def register(self, user_data: UserCreate) -> User:
+        # Pre-checks give specific error messages; IntegrityError is the safety net for races.
         if self.db.execute(select(User).where(User.email == user_data.email)).scalar_one_or_none():
             raise HTTPException(
                 status_code=status.HTTP_400_BAD_REQUEST,
@@ -29,13 +31,20 @@ class AuthService:
             hashed_password=hash_password(user_data.password),
         )
         self.db.add(user)
-        self.db.commit()
+        try:
+            self.db.commit()
+        except IntegrityError:
+            self.db.rollback()
+            raise HTTPException(
+                status_code=status.HTTP_400_BAD_REQUEST,
+                detail="Email or username already taken",
+            )
         self.db.refresh(user)
         return user
 
     def authenticate(self, email: str, password: str) -> User | None:
         user = self.db.execute(select(User).where(User.email == email)).scalar_one_or_none()
-        if user and verify_password(password, user.hashed_password):
+        if user and user.is_active and verify_password(password, user.hashed_password):
             return user
         return None
 

@@ -1,4 +1,4 @@
-from fastapi import APIRouter, Depends, HTTPException, status
+from fastapi import APIRouter, Depends, HTTPException, Query, status
 from sqlalchemy.exc import IntegrityError
 from sqlalchemy.orm import Session
 
@@ -14,8 +14,9 @@ router = APIRouter(prefix="/books", tags=["books"])
 
 @router.get("/search/isbn/{isbn}", response_model=BookResponse)
 def search_by_isbn(isbn: str, db: Session = Depends(get_db)) -> BookResponse:
-    """Find a book by its exact ISBN."""
-    book = db.query(Book).filter(Book.isbn == isbn).first()
+    """Find a book by ISBN; hyphens and spaces in the path are stripped before matching."""
+    normalized = isbn.replace("-", "").replace(" ", "")
+    book = db.query(Book).filter(Book.isbn == normalized).first()
     if not book:
         raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Book not found")
     return book
@@ -27,8 +28,8 @@ def list_books(
     author: str | None = None,
     genre: str | None = None,
     available_only: bool = False,
-    skip: int = 0,
-    limit: int = 100,
+    skip: int = Query(default=0, ge=0),
+    limit: int = Query(default=100, ge=1, le=200),
     db: Session = Depends(get_db),
 ) -> list[BookResponse]:
     """List books with optional filters and pagination."""
@@ -89,7 +90,8 @@ def update_book(
     update_data = book_in.model_dump(exclude_unset=True)
     if "total_copies" in update_data:
         currently_borrowed = book.total_copies - book.available_copies
-        if update_data["total_copies"] < currently_borrowed:
+        new_total = update_data["total_copies"]
+        if new_total < currently_borrowed:
             raise HTTPException(
                 status_code=status.HTTP_400_BAD_REQUEST,
                 detail=(
@@ -97,9 +99,18 @@ def update_book(
                     f" ({currently_borrowed})"
                 ),
             )
+        # Keep available_copies consistent: adjust by the same delta as total_copies.
+        update_data["available_copies"] = book.available_copies + (new_total - book.total_copies)
     for field, value in update_data.items():
         setattr(book, field, value)
-    db.commit()
+    try:
+        db.commit()
+    except IntegrityError:
+        db.rollback()
+        raise HTTPException(
+            status_code=status.HTTP_400_BAD_REQUEST,
+            detail="A book with this ISBN already exists",
+        )
     db.refresh(book)
     return book
 

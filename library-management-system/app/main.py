@@ -5,14 +5,15 @@ from fastapi import FastAPI
 from fastapi.middleware.cors import CORSMiddleware
 
 from app.core.config import get_settings
-from app.database import Base, engine
-from app.models import Book, Borrowing, Fine, User  # register all tables with Base
+from app.models import Book, Borrowing, Fine, User  # noqa: F401 — registers ORM tables
 from app.routers import admin, auth, books, borrowings, readers
 
 
 @asynccontextmanager
 async def lifespan(app: FastAPI) -> AsyncGenerator[None, None]:
-    Base.metadata.create_all(bind=engine)
+    # Schema is managed by Alembic migrations (`alembic upgrade head`).
+    # Never call create_all() here — it bypasses migration history and causes
+    # race conditions when multiple app instances start simultaneously.
     yield
 
 

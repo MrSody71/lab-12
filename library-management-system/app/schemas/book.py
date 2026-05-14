@@ -1,6 +1,8 @@
 from datetime import datetime
 from pydantic import BaseModel, ConfigDict, Field, field_validator
 
+_CURRENT_YEAR: int = datetime.now().year
+
 
 def _validate_isbn_digits(value: str) -> str:
     digits = value.replace("-", "").replace(" ", "")
@@ -14,7 +16,7 @@ class BookBase(BaseModel):
     author: str
     isbn: str
     genre: str | None = None
-    year_published: int | None = Field(default=None, ge=1000, le=2025)
+    year_published: int | None = Field(default=None, ge=1000, le=_CURRENT_YEAR)
     total_copies: int = Field(default=1, ge=1)
     description: str | None = None
 
@@ -26,7 +28,7 @@ class BookBase(BaseModel):
 
 class BookCreate(BookBase):
     genre: str
-    year_published: int = Field(ge=1000, le=2025)
+    year_published: int = Field(ge=1000, le=_CURRENT_YEAR)
 
 
 class BookUpdate(BaseModel):
@@ -34,7 +36,7 @@ class BookUpdate(BaseModel):
     author: str | None = None
     isbn: str | None = None
     genre: str | None = None
-    year_published: int | None = Field(default=None, ge=1000, le=2025)
+    year_published: int | None = Field(default=None, ge=1000, le=_CURRENT_YEAR)
     total_copies: int | None = Field(default=None, ge=1)
     description: str | None = None
 

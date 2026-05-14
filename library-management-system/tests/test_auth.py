@@ -115,6 +115,22 @@ async def test_login_nonexistent_user(client: AsyncClient) -> None:
     assert response.status_code == 401
 
 
+async def test_login_deactivated_user_is_rejected(
+    client: AsyncClient,
+    regular_user: User,
+    db_session: Session,
+) -> None:
+    """Deactivated account must not receive a fresh JWT (authenticate checks is_active)."""
+    regular_user.is_active = False
+    db_session.commit()
+
+    response = await client.post(
+        "/auth/login",
+        data={"username": regular_user.email, "password": "password123"},
+    )
+    assert response.status_code == 401
+
+
 # ── /auth/me ──────────────────────────────────────────────────────────────────
 
 async def test_get_me_authorized(

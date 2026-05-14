@@ -78,6 +78,14 @@ async def test_search_invalid_isbn(client: AsyncClient) -> None:
     assert response.status_code == 404
 
 
+async def test_search_by_isbn_with_hyphens(client: AsyncClient, sample_book: Book) -> None:
+    """ISBN with hyphens in the URL must still find the normalized stored value."""
+    hyphenated = f"978-{sample_book.isbn[3:]}"
+    response = await client.get(f"/books/search/isbn/{hyphenated}")
+    assert response.status_code == 200
+    assert response.json()["isbn"] == sample_book.isbn
+
+
 # ── admin: create ─────────────────────────────────────────────────────────────
 
 async def test_create_book_as_admin(
@@ -116,9 +124,11 @@ async def test_create_book_duplicate_isbn(
 async def test_create_book_invalid_year(
     client: AsyncClient, admin_headers: dict[str, str]
 ) -> None:
-    """year_published > 2025 fails Pydantic validation."""
+    """year_published more than 5 years in the future fails Pydantic validation."""
+    from datetime import datetime
+    future_year = datetime.now().year + 5
     response = await client.post(
-        "/books/", headers=admin_headers, json=_book(year_published=2030)
+        "/books/", headers=admin_headers, json=_book(year_published=future_year)
     )
     assert response.status_code == 422
 
@@ -164,6 +174,54 @@ async def test_update_book_not_found(
         "/books/99999", headers=admin_headers, json={"title": "Ghost"}
     )
     assert response.status_code == 404
+
+
+async def test_update_book_total_copies_increase_adjusts_available(
+    client: AsyncClient,
+    admin_headers: dict[str, str],
+    sample_book: Book,
+) -> None:
+    """Increasing total_copies must increase available_copies by the same delta."""
+    original_available = sample_book.available_copies  # 3
+    response = await client.put(
+        f"/books/{sample_book.id}",
+        headers=admin_headers,
+        json={"total_copies": sample_book.total_copies + 2},
+    )
+    assert response.status_code == 200
+    data = response.json()
+    assert data["total_copies"] == sample_book.total_copies + 2
+    assert data["available_copies"] == original_available + 2
+
+
+async def test_update_book_duplicate_isbn_returns_400(
+    client: AsyncClient,
+    admin_headers: dict[str, str],
+    sample_book: Book,
+) -> None:
+    """Updating ISBN to one that already exists must return 400, not 500."""
+    # Create a second book
+    second = await client.post(
+        "/books/",
+        headers=admin_headers,
+        json={
+            "title": "Second Book",
+            "author": "Author",
+            "isbn": "9780000000001",
+            "genre": "Fiction",
+            "year_published": 2000,
+            "total_copies": 1,
+        },
+    )
+    assert second.status_code == 201
+    # Try to update sample_book's ISBN to the second book's ISBN
+    response = await client.put(
+        f"/books/{sample_book.id}",
+        headers=admin_headers,
+        json={"isbn": "9780000000001"},
+    )
+    assert response.status_code == 400
+    assert "ISBN" in response.json()["detail"]
 
 
 async def test_update_book_total_copies_below_borrowed(

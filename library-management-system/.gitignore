@@ -2,6 +2,9 @@
 .env
 .env.local
 
+# Local Docker Compose overrides (dev-only settings)
+docker-compose.override.yml
+
 # Python
 __pycache__/
 *.py[cod]
