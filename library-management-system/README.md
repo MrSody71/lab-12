@@ -1,5 +1,9 @@
 # Library Management System
 
+**Автор:** Артюх Виталий Валериевич  
+**Группа:** 221131  
+**Вариант:** 2 — Система управления библиотекой  
+
 ![Python](https://img.shields.io/badge/Python-3.11-blue?logo=python&logoColor=white)
 ![FastAPI](https://img.shields.io/badge/FastAPI-0.111-009688?logo=fastapi&logoColor=white)
 ![PostgreSQL](https://img.shields.io/badge/PostgreSQL-15-336791?logo=postgresql&logoColor=white)
