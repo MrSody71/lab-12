@@ -12,7 +12,10 @@
       "Bash(python -c \"import fastapi; print\\('fastapi ok'\\)\")",
       "PowerShell(Get-Command *)",
       "PowerShell(Get-ChildItem \"C:\\\\Homework\\\\lab-12\\\\library-management-system\" -Name | Where-Object { $_ -match \"venv|env|\\\\.venv\" })",
-      "Bash(git checkout *)"
+      "Bash(git checkout *)",
+      "Bash(Get-ChildItem -Path \"C:\\\\Homework\\\\lab-12\" -Depth 0)",
+      "Bash(Select-Object Name, Mode)",
+      "PowerShell(git *)"
     ]
   }
 }
