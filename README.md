@@ -3,6 +3,7 @@
 **Автор:** Артюх Виталий Валериевич  
 **Группа:** 221131  
 **Вариант:** 2 — Система управления библиотекой  
+**Сложность:** Повышенная
 
 ![Python](https://img.shields.io/badge/Python-3.11-blue?logo=python&logoColor=white)
 ![FastAPI](https://img.shields.io/badge/FastAPI-0.111-009688?logo=fastapi&logoColor=white)
