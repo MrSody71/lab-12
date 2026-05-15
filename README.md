@@ -456,7 +456,7 @@ pytest --cov=app --cov-report=html
 
 ## Prompt Log
 
-История промптов, использованных при разработке проекта, находится в файле [`prompt_log.md`](./prompt_log.md).
+История промптов, использованных при разработке проекта, находится в файле [`prompt_log.md`](./library-management-system/prompt_log.md).
 
 ---
 
